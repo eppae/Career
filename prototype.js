@@ -226,21 +226,62 @@ function onEdit(e) {
 }
 
 // 100% 감면 조건 처리
-function handleCheck100Condition(checkCount) {
+function handleCheck100Condition(isChecked, matchedObjects, row, DiscountCheckIndex) {
+    const checkCount = matchedObjects.checkCount;
     // 추가 제한 조건 확인
     // 예: 최대 체크 가능 횟수 초과 시 true 반환
     if (checkCount > 1) {
-        return true; // 되돌리기
+        sheet.getRange(row, DiscountCheckIndex).setValue(e.oldValue); // 되돌리기
+        resetRowColor();
     }
+    else if (checkCount === 0){
+        checkCount += 1;
+        setRowColor();
+    }
+    return matchedObjects; // 진행 허용
+}
+
+// 50% 감면 조건 처리 
+function handleCheck50Condition(isChecked, matchedObjects, row, DiscountCheckIndex) {
+    let checkCount = matchedObjects.checkCount; 
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("감면여부현황");
+    
+    // 체크가 True인 경우
+    if (isChecked === "True") {
+        if (checkCount < 2) {
+            checkCount++;
+            setRowColor(row, checkCount);
+        } else {
+            // 체크 횟수 초과 시 체크를 되돌림
+            sheet.getRange(row, DiscountCheckIndex).setValue(e.oldValue);
+        }
+    } 
+    // 체크가 False인 경우
+    else if (isChecked === "False") {
+        if (checkCount > 0) {
+            checkCount--;
+            if (checkCount === 0) {
+                resetRowColor(row); // 체크 모두 해제
+            } else {
+                setRowColor(row, checkCount); // 남은 체크에 따른 색상 적용
+            }
+        }
+    }
+    
     return false; // 진행 허용
 }
 
-// 50% 감면 조건 처리
-function handleCheck50Condition(checkCount) {
-    // 추가 제한 조건 확인
-    // 예: 최대 체크 가능 횟수 초과 시 true 반환
-    if (checkCount > 2) {
-        return true; // 되돌리기
-    }
-    return false; // 진행 허용
+function setRowColor(row, checkCount) {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("감면여부현황");
+    const targetRow = sheet.getRange(row, 1, 1, sheet.getLastColumn()); // 행 전체
+    const colors = ["#FFCC66", "#FF6666"]; // 주황색, 밝은 빨간색
+    
+    targetRow.setBackground(colors[checkCount - 1]); // checkCount에 맞는 색상 적용
 }
+
+function resetRowColor(row) {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("감면여부현황");
+    const targetRow = sheet.getRange(row, 1, 1, sheet.getLastColumn());
+    targetRow.setBackground(null); // 색상 초기화
+}
+
