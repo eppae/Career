@@ -71,14 +71,29 @@ function createDataClass(dataSheet) {
         const datavalues = dataSheet.getDataRange().getValues();
         if (datavalues.length < 2) throw new Error("'감면여부현황' 시트에 데이터가 부족합니다.");
 
-        const headers = datavalues[1];
+        const headers = datavalues[1]; // 두 번째 행을 헤더로 가정
         const headerMap = mapHeaders(headers);
-        return filterAndMapData(datavalues.slice(1), headerMap);
+
+        const filteredData = filterAndMapData(datavalues.slice(1), headerMap);
+
+        // 중복 제거
+        const seen = new Set();
+        const uniqueData = filteredData.filter(item => {
+            const key = `${item.name}|${item.gender}|${item.birthday}`;
+            if (seen.has(key)) {
+                return false; // 중복된 데이터는 제외
+            }
+            seen.add(key);
+            return true; // 중복되지 않은 데이터는 추가
+        });
+
+        return uniqueData;
     } catch (error) {
         Logger.log("Error in createDataClass: " + error.message);
         return [];
     }
 }
+
 
 function loadDataClass(targetSheet) {
     try {
@@ -95,19 +110,59 @@ function loadDataClass(targetSheet) {
 }
 
 function updateCheckcountSheet(sheet, dataObjects) {
-    sheet.clear(); // 시트 전체 초기화
+    try {
+        // 기존 데이터 가져오기
+        const existingData = sheet.getDataRange().getValues();
+        let headers = [];
+        let headerMap = {};
 
-    // 헤더를 명시적으로 추가
-    // 데이터 추가 (헤더와 동일한 데이터를 추가하지 않음)
-    dataObjects.forEach(obj => {
-        // 모든 필드가 유효한 경우에만 추가
-        if (obj.name && obj.gender && obj.birthday) {
-            sheet.appendRow([obj.name, obj.gender, obj.birthday, obj.checkCount]);
+        if (existingData.length === 0 || existingData[0].length === 0) {
+            // 시트가 비어있다면 헤더를 추가
+            headers = ["이름", "성별", "나이", "checkCount"];
+            sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        } else {
+            headers = existingData[0]; // 첫 번째 행은 헤더
         }
-    });
 
-    Logger.log("'checkcount' sheet updated successfully.");
+        // 헤더 맵 생성
+        headerMap = mapHeaders(headers);
+
+        // 기존 데이터 확인 및 업데이트
+        const updatedRows = [];
+        const newRows = [];
+
+        // dataObjects의 두 번째 데이터부터 처리
+        dataObjects.slice(1).forEach(obj => {
+            const existingRow = existingData.find(row =>
+                row[headerMap["이름"] - 1] === obj.name &&
+                row[headerMap["성별"] - 1] === obj.gender &&
+                row[headerMap["나이"] - 1] === obj.birthday
+            );
+
+            if (existingRow) {
+                // 기존 데이터 업데이트
+                const rowIndex = existingData.indexOf(existingRow) + 1; // 실제 행 번호 (1-based)
+                sheet.getRange(rowIndex, headerMap["checkCount"]).setValue(obj.checkCount);
+                updatedRows.push(rowIndex);
+            } else {
+                // 새 데이터 추가
+                newRows.push([obj.name, obj.gender, obj.birthday, obj.checkCount]);
+            }
+        });
+
+        // 새 데이터 추가
+        if (newRows.length > 0) {
+            const startRow = sheet.getLastRow() + 1;
+            sheet.getRange(startRow, 1, newRows.length, newRows[0].length).setValues(newRows);
+        }
+
+        Logger.log(`Updated rows: ${updatedRows.length}, New rows: ${newRows.length}`);
+    } catch (error) {
+        Logger.log("Error in updateCheckcountSheet: " + error.message);
+        throw new Error("데이터 업데이트 중 오류 발생: " + error.message);
+    }
 }
+
 
 function onEdit(e) {
     try {
@@ -130,16 +185,19 @@ function onEdit(e) {
         const condition = sheet.getRange(row, headerMap["감면사유"]).getValue();
         const isChecked = sheet.getRange(row, DiscountCheckIndex).getValue();
 
+        // 먼저 checkCount 시트를 업데이트한 후 데이터를 다시 로드합니다.
         const checkCountData = loadDataClass(SpreadsheetApp.getActiveSpreadsheet().getSheetByName("checkcount"));
+
+        alertMessage("checkCountData: " + JSON.stringify(checkCountData));
+
         const checkCountObject = checkCountData.find(obj =>
             obj.name === name &&
             obj.gender === gender &&
             obj.birthday === birthday
         );
 
-        
-        // alertMessage("checkCountObject: " + JSON.stringify(checkCountObject));      
-        //alertMessage(`name: ${name}, gender: ${gender}, birthday: ${birthday}`);
+        alertMessage("name: " + name + ", gender: " + gender + ", age: " + birthday);
+        alertMessage("checkCountObject: " + JSON.stringify(checkCountObject));
 
         if (!checkCountObject) throw new Error("일치하는 데이터가 없습니다.");
 
@@ -150,6 +208,8 @@ function onEdit(e) {
             : "수급-기타, 차상위는 최대 2개까지 감면적용이 가능합니다.";
 
         handleCheckCondition(isChecked, [checkCountObject], row, DiscountCheckIndex, checkCountData, maxCount, colors, errorMessage);
+
+        // 시트를 업데이트한 후 데이터를 다시 반영
         updateCheckcountSheet(SpreadsheetApp.getActiveSpreadsheet().getSheetByName("checkcount"), checkCountData);
 
     } catch (error) {
@@ -157,6 +217,7 @@ function onEdit(e) {
         alertMessage("데이터 수정 중 오류 발생: " + error.message);
     }
 }
+
 
 function handleCheckCondition(isChecked, matchedObjects, row, DiscountCheckIndex, dataObjects, maxCount, colors, errorMessage) {
     matchedObjects.forEach(obj => {
